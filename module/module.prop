@@ -1,0 +1,6 @@
+id=gofile_vlc_bridge
+name=Gofile VLC Bridge
+version=1.0.0
+versionCode=10000
+author=Zockerwolf76
+description=Gofile folder browser and localhost HTTP Range proxy for VLC on Android.
