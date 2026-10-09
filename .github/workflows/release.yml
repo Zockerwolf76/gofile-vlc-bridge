@@ -1,0 +1,61 @@
+name: Build and publish KernelSU module
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/**'
+      - 'module/**'
+      - 'scripts/**'
+      - 'VERSION'
+      - 'go.mod'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build ARM64 module
+        run: bash scripts/build.sh
+      - name: Verify ZIP
+        run: unzip -t dist/*.zip
+      - name: Publish GitHub Release and update metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          TAG="v$VERSION"
+          ASSET="dist/gofile-vlc-bridge-v$VERSION.zip"
+          if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release create "$TAG" "$ASSET" --repo "$REPO" --target "$GITHUB_SHA" --title "Gofile VLC Bridge $TAG" --notes "KernelSU module for Android ARM64. See README for installation and limitations."
+          else
+            gh release upload "$TAG" "$ASSET" --repo "$REPO" --clobber
+          fi
+          IFS=. read -r MAJOR MINOR PATCH <<< "$VERSION"
+          CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))
+          python3 - "$VERSION" "$CODE" "$REPO" <<'PY'
+          import json,sys
+          version,code,repo=sys.argv[1:]
+          obj={"version":version,"versionCode":int(code),"zipUrl":f"https://github.com/{repo}/releases/download/v{version}/gofile-vlc-bridge-v{version}.zip","changelog":f"https://github.com/{repo}/releases/tag/v{version}"}
+          with open('update.json','w') as f: json.dump(obj,f,indent=2); f.write('\n')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add update.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: update module release metadata [skip ci]"
+            git push origin HEAD:main
+          fi
+          
